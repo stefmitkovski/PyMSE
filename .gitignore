@@ -8,6 +8,8 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+bin/
+include
 build/
 develop-eggs/
 dist/
@@ -15,7 +17,7 @@ downloads/
 eggs/
 .eggs/
 lib/
-lib64/
+lib64
 parts/
 sdist/
 var/
@@ -24,6 +26,7 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+pyvenv.cfg
 MANIFEST
 
 # PyInstaller
