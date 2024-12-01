@@ -2,15 +2,21 @@ from flask import Flask, jsonify
 from pymongo import MongoClient, errors
 from bs4 import BeautifulSoup
 import pandas as pd
-import requests, sys, os, re
+import requests, sys, os, re, time
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# DATABASE CREDENTIALS
 MONGODB_HOST = 'localhost'
 MONGODB_PORT = 27017
 DB_NAME = 'pyMSE'
+
+# OTHER GLOBAL VARIBLES
+REPORTS_URL = "https://www.mse.mk/mk/reports"
+WEBSITE_URL = "https://www.mse.mk/"
 REPORTS_DIRECTORY = 'reports'
-STARTING_DATE = '2004'
+STARTING_DATE = 2023
 # COLLECTION_NAME = 'reports'
 
 mongo_client = MongoClient(MONGODB_HOST, MONGODB_PORT)
@@ -81,15 +87,61 @@ def report():
 # Simnigi site izvestai sto falat
 @app.route('/api/report/download')
 def download():
-    reports = list_reports(fromRequest=False)
-    print(reports)
-    if reports == None:
-        print("Nema izestai\n")
-        return jsonify({"ok":False}),200
-    else:
-        print("Gi ima slednite izestai\n")
-        print(reports)
-        return jsonify({"reports":reports}),200
+    current_reports = list_reports(fromRequest=False)    
+
+    start_date = datetime(STARTING_DATE, 1, 1)
+    current_date = datetime.now()
+
+    current = start_date
+    while current <= current_date:
+        date = current.strftime("%Y-%m").split("-")
+        print(f"Godina: {date[0]}, mesec: {date[1]}")
+        
+        try:
+            body = {
+                        "cmbMonth": date[1],
+                        "cmbYear": date[0],
+                        "reportCategorySelectList":"daily-report"
+                    }
+            result = requests.get(REPORTS_URL, data=body, timeout=10)
+            result.raise_for_status()
+            
+            if result.status_code == 200:
+                page = BeautifulSoup(result.text, "html.parser")
+                daily_reports = page.find("div", id="Daily Report")
+                if daily_reports:
+                    data = [{"href": a['href'], "text": a.get_text(strip=True)} for a in daily_reports.find_all("a", href=True)]
+                    for report in data:
+                        if report['text'] in current_reports:
+                            print(f"Go ima veke izvestajot {report['text']}, preskoknuvanje...")
+                        else:
+                            get_report = requests.get(WEBSITE_URL+report['href'])
+                            if get_report.status_code == 200:
+                                name = 'reports/'+report['text']+".xls"
+                                with open(name,'wb') as file:
+                                    file.write(get_report.content)
+                                print(f"Uspesno zacuvan izvestajot: {report['text']}")
+                            else:
+                                print(f"Neuspesno prevzemanje na izvestajot: {report['text']}")
+
+                            print("Cekanje...")
+                            time.sleep(3)
+                else:
+                    print("Ne e najden takov div")
+            print("Cekanje...")
+            time.sleep(3)
+        except:
+            print("Nema konekcija so stranata")
+            print("Cekanje...")
+            time.sleep(3)
+            continue # Obidi se povtorno da stapis vo konekcija so stranata
+        
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+    return jsonify("ok")
 
 # Listanje na site izestai koi go ima na prilog serverot
 @app.route('/api/report/lists')
