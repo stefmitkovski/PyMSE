@@ -62,30 +62,82 @@ def latest():
 
 
 # Obrabotka na izvestai
-@app.route('/api/report')
+@app.route('/api/reports')
 def report():
-    file_path = 'ReportMK_1_20151102_20151102.xls'  # Pateka kon izestajot
-    report = pd.read_excel(file_path)
+    file_path = 'reports/'
     companies = db['companies']
     reports = db['reports']
-
-    for index, row in report.iterrows():
-        if pd.isna(row.iloc[1]):
+    priority_shares = False
+    list_of_reports = list_reports(fromRequest=False)
+    
+    for report in list_of_reports:
+        temp_path = file_path + report + ".xls"
+        
+        try:
+            report_content = pd.read_excel(temp_path)
+        except:
+            print(f"Nemoze da se pristapi izvestajot {report}")
             continue
         
-        key = row.iloc[0].strip().lower() 
-        exists = companies.find_one({"key": key})
+        for index, row in report_content.iterrows():
+                    
+            if re.search("приоритетни акции",str(row.iloc[0]).strip()) or re.search("prioritetni akcii",str(row.iloc[0]).strip()):
+                priority_shares = True
+            
+            if re.search("обични акции",str(row.iloc[0]).strip()) or re.search("obi~ni akcii",str(row.iloc[0]).strip()):
+                priority_shares = False
+                
+            if pd.isna(row.iloc[1]):
+                continue
+            
+            key = row.iloc[0].strip().lower() 
+            exists = companies.find_one({"key": key})
 
-        if exists:
-            print(f"POSTOI FIRMATA {row.iloc[0]}")
-            continue
-        else:
-            print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
+            if exists and not priority_shares:
+                record = {
+                        "symbol": exists['value'],
+                        "date": report,
+                        "average_price": row.iloc[1],
+                        "change": row.iloc[2],
+                        "purchase_price": row.iloc[3],
+                        "sale_price": row.iloc[4],
+                        "max": row.iloc[5],
+                        "min": row.iloc[6],
+                        "last_price": row.iloc[7],
+                        "quantity": row.iloc[8],
+                        "turnover_in_1000_den": row.iloc[9],
+                    }
+                
+                if not reports.find_one({"date": report, "symbol": exists['value']}):
+                    reports.insert_one(record)
+                #     print("Record inserted.")
+                # else:
+                #     print("Record already exists. Skipping insertion.")                
+                # # print(f"POSTOI FIRMATA {row.iloc[0]}")
+                # print(f"INFO: {exists['value']}")
+            # else:
+            #     if priority_shares:
+            #         print(f"PIORITETNA FIRMATA {row.iloc[0]}")    
+            #     else:
+            #         print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
             
     return jsonify("ok"), 200        
 
+# Vrakanje informacii za odredena firma
+@app.route('/api/reports/<symbol>', methods=['GET'])
+def report_for_a_company(symbol):
+    reports = db['reports']
+    results = reports.find({"symbol": symbol})
+    response_data = []
+
+    for document in results:
+        del document["_id"]
+        response_data.append(document)
+
+    return jsonify(response_data), 200
+
 # Simnigi site izvestai sto falat
-@app.route('/api/report/download')
+@app.route('/api/reports/download')
 def download():
     current_reports = list_reports(fromRequest=False)    
 
@@ -144,7 +196,7 @@ def download():
     return jsonify("ok")
 
 # Listanje na site izestai koi go ima na prilog serverot
-@app.route('/api/report/lists')
+@app.route('/api/reports/lists')
 def list_reports(fromRequest = True):
     if not os.path.exists(REPORTS_DIRECTORY):
         os.makedirs(REPORTS_DIRECTORY)
