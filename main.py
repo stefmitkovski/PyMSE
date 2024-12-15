@@ -1,5 +1,6 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from pymongo import MongoClient, errors
+from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 import pandas as pd
 import requests, sys, os, re, time
@@ -16,7 +17,7 @@ DB_NAME = 'pyMSE'
 REPORTS_URL = "https://www.mse.mk/mk/reports"
 WEBSITE_URL = "https://www.mse.mk/"
 REPORTS_DIRECTORY = 'reports'
-STARTING_DATE = 2023
+STARTING_DATE = 2004
 # COLLECTION_NAME = 'reports'
 
 mongo_client = MongoClient(MONGODB_HOST, MONGODB_PORT)
@@ -61,80 +62,118 @@ def latest():
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 
-# Obrabotka na izvestai
-@app.route('/api/reports')
+# API endpoint za zapocnuvanjeto na prerabotkata na izvestaite
+# i za vrakanje na informaciija za odredena firma
+@app.route('/api/reports', methods=['GET','POST'])
 def report():
+    if request.method == 'GET':
+        print('Zapocnuvanje na prerabotkata na izevstaite')
+        try:
+            list_of_reports = list_reports(fromRequest=False)
+            print(list_of_reports)
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                executor.map(processing_reports,list_of_reports)
+            
+            return jsonify({"ok":True}),200
+        except:
+            print("Greska pri prevzemanje na izvestaite")
+            return jsonify({"error":True}),200
+    
+    elif request.method == 'POST':
+        fromDate = ''
+        toDate = ''
+        symbol = ''
+        if 'symbol' not in request.json:
+            print("Fali symbol")
+            return jsonify({"error":True})
+        else:
+            symbol = request.json['symbol']
+
+        if 'from' in request.json:
+            fromDate = request.json['from']
+        else:
+            fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y.%m')
+            
+        if 'to' in request.json:
+            toDate = request.json['to']
+        else:
+            toDate = datetime.now().strftime("%Y.%m")
+                
+        reports = db['reports']
+        results = reports.find({
+            "symbol": symbol,
+            "date": {
+                "$gte": fromDate,
+                "$lte": toDate
+                }
+            })
+        response_data = []
+
+        for document in results:
+            del document["_id"]
+            response_data.append(document)
+
+        return jsonify(response_data), 200
+
+# Funkcija za prerabotka na izvestaite(paralelno)
+def processing_reports(report):
     file_path = 'reports/'
     companies = db['companies']
     reports = db['reports']
     priority_shares = False
-    list_of_reports = list_reports(fromRequest=False)
-    
-    for report in list_of_reports:
-        temp_path = file_path + report + ".xls"
+    # for report in list_of_reports:
+    temp_path = file_path + report + ".xls"
         
-        try:
-            report_content = pd.read_excel(temp_path)
-        except:
-            print(f"Nemoze da se pristapi izvestajot {report}")
-            continue
+    try:
+        report_content = pd.read_excel(temp_path)
+    except:
+            # print(temp_path)
+        print(f"Nemoze da se pristapi izvestajot {report}")
+        return
         
-        for index, row in report_content.iterrows():
+    for index, row in report_content.iterrows():
                     
-            if re.search("приоритетни акции",str(row.iloc[0]).strip()) or re.search("prioritetni akcii",str(row.iloc[0]).strip()):
-                priority_shares = True
+        if re.search("приоритетни акции",str(row.iloc[0]).strip()) or re.search("prioritetni akcii",str(row.iloc[0]).strip()):
+            priority_shares = True
             
-            if re.search("обични акции",str(row.iloc[0]).strip()) or re.search("obi~ni akcii",str(row.iloc[0]).strip()):
-                priority_shares = False
+        if re.search("обични акции",str(row.iloc[0]).strip()) or re.search("obi~ni akcii",str(row.iloc[0]).strip()):
+            priority_shares = False
                 
-            if pd.isna(row.iloc[1]):
-                continue
+        if pd.isna(row.iloc[1]):
+            continue
             
-            key = row.iloc[0].strip().lower() 
-            exists = companies.find_one({"key": key})
+        key = row.iloc[0].strip().lower() 
+        exists = companies.find_one({"key": key})
 
-            if exists and not priority_shares:
-                record = {
-                        "symbol": exists['value'],
-                        "date": report,
-                        "average_price": row.iloc[1],
-                        "change": row.iloc[2],
-                        "purchase_price": row.iloc[3],
-                        "sale_price": row.iloc[4],
-                        "max": row.iloc[5],
-                        "min": row.iloc[6],
-                        "last_price": row.iloc[7],
-                        "quantity": row.iloc[8],
-                        "turnover_in_1000_den": row.iloc[9],
-                    }
+        if exists and not priority_shares:
+            record = {
+                    "symbol": exists['value'],
+                    "date": report,
+                    "average_price": row.iloc[1],
+                    "change": row.iloc[2],
+                    "purchase_price": row.iloc[3],
+                    "sale_price": row.iloc[4],
+                    "max": row.iloc[5],
+                    "min": row.iloc[6],
+                    "last_price": row.iloc[7],
+                    "quantity": row.iloc[8],
+                    "turnover_in_1000_den": row.iloc[9],
+                }
                 
-                if not reports.find_one({"date": report, "symbol": exists['value']}):
-                    reports.insert_one(record)
-                #     print("Record inserted.")
-                # else:
-                #     print("Record already exists. Skipping insertion.")                
-                # # print(f"POSTOI FIRMATA {row.iloc[0]}")
-                # print(f"INFO: {exists['value']}")
-            # else:
-            #     if priority_shares:
-            #         print(f"PIORITETNA FIRMATA {row.iloc[0]}")    
-            #     else:
-            #         print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
+            if not reports.find_one({"date": report, "symbol": exists['value']}):
+                reports.insert_one(record)
+                print("Record inserted.")
+            else:
+                print("Record already exists. Skipping insertion.")                
+            # print(f"POSTOI FIRMATA {row.iloc[0]}")
+            # print(f"INFO: {exists['value']}")
+        # else:
+        #     if priority_shares:
+        #         print(f"PIORITETNA FIRMATA {row.iloc[0]}")    
+        #     else:
+        #         print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
             
-    return jsonify("ok"), 200        
-
-# Vrakanje informacii za odredena firma
-@app.route('/api/reports/<symbol>', methods=['GET'])
-def report_for_a_company(symbol):
-    reports = db['reports']
-    results = reports.find({"symbol": symbol})
-    response_data = []
-
-    for document in results:
-        del document["_id"]
-        response_data.append(document)
-
-    return jsonify(response_data), 200
+    # return jsonify("ok"), 200        
 
 # Simnigi site izvestai sto falat
 @app.route('/api/reports/download')
@@ -148,7 +187,7 @@ def download():
     while current <= current_date:
         date = current.strftime("%Y-%m").split("-")
         print(f"Godina: {date[0]}, mesec: {date[1]}")
-        
+
         try:
             body = {
                         "cmbMonth": date[1],
@@ -215,6 +254,35 @@ def list_reports(fromRequest = True):
     else:
         return files
 
+# Vrati lita na firmi koi se pojavuvaat vo izvestaite
+# Za testiranje samo
+@app.route('/api/list_reports')
+def func_list_reports():
+    file_path = 'reports/'
+    
+    list_of_reports = list_reports(fromRequest=False)
+    list_companies = []
+    
+    for report in list_of_reports:
+        temp_path = file_path + report + ".xls"
+
+        try:
+            report_content = pd.read_excel(temp_path)
+        except:
+            print(f"Nemoze da se pristapi izvestajot {report}")
+            continue
+
+        for index, row in report_content.iterrows():
+
+            if pd.isna(row.iloc[1]):
+                continue
+
+            company_name = str(row.iloc[0]).strip()
+            if company_name not in list_companies:
+                list_companies.append(company_name)
+                
+    return jsonify(list_companies), 200
+    
 if __name__ == '__main__':
     
     # Kreiranje na key-value databaza vo mongodb
