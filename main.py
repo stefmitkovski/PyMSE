@@ -17,7 +17,7 @@ DB_NAME = 'pyMSE'
 REPORTS_URL = "https://www.mse.mk/mk/reports"
 WEBSITE_URL = "https://www.mse.mk/"
 REPORTS_DIRECTORY = 'reports'
-STARTING_DATE = 2004
+STARTING_DATE = 2020
 # COLLECTION_NAME = 'reports'
 
 mongo_client = MongoClient(MONGODB_HOST, MONGODB_PORT)
@@ -71,7 +71,7 @@ def report():
         try:
             list_of_reports = list_reports(fromRequest=False)
             print(list_of_reports)
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=50) as executor:
                 executor.map(processing_reports,list_of_reports)
             
             return jsonify({"ok":True}),200
@@ -83,30 +83,36 @@ def report():
         fromDate = ''
         toDate = ''
         symbol = ''
-        if 'symbol' not in request.json:
-            print("Fali symbol")
-            return jsonify({"error":True})
-        else:
+        if 'symbol' in request.json:
             symbol = request.json['symbol']
 
         if 'from' in request.json:
             fromDate = request.json['from']
         else:
-            fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y.%m')
+            fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y-%m-%d')
             
         if 'to' in request.json:
             toDate = request.json['to']
         else:
-            toDate = datetime.now().strftime("%Y.%m")
-                
+            toDate = datetime.now().strftime("%Y-%m-%d")
+        
         reports = db['reports']
-        results = reports.find({
-            "symbol": symbol,
-            "date": {
-                "$gte": fromDate,
-                "$lte": toDate
-                }
-            })
+        if symbol == '':
+            results = reports.find({
+                "date": {
+                    "$gte": datetime.strptime(fromDate, "%Y-%m-%d"),
+                    "$lte": datetime.strptime(toDate, "%Y-%m-%d")
+                    }
+                })
+        else:
+            results = reports.find({
+                "symbol": symbol,
+                "date": {
+                    "$gte": datetime.strptime(fromDate, "%Y-%m-%d"),
+                    "$lte": datetime.strptime(toDate, "%Y-%m-%d")
+                    }
+                })
+            
         response_data = []
 
         for document in results:
@@ -121,9 +127,14 @@ def processing_reports(report):
     companies = db['companies']
     reports = db['reports']
     priority_shares = False
+    
+    # Ako ne e vo opseg ripnigo
+    if int(report.split('.')[2]) < STARTING_DATE:
+        print(f"Se ripnuva izvestajot za datumot {report}")
+        return
+    
     # for report in list_of_reports:
     temp_path = file_path + report + ".xls"
-        
     try:
         report_content = pd.read_excel(temp_path)
     except:
@@ -145,10 +156,13 @@ def processing_reports(report):
         key = row.iloc[0].strip().lower() 
         exists = companies.find_one({"key": key})
 
+        split_date = report.split('.') 
+        correct_date = f"{split_date[2]}-{split_date[1]}-{split_date[0]}"
+        print(f"Pravilen datum {correct_date}")
         if exists and not priority_shares:
             record = {
                     "symbol": exists['value'],
-                    "date": report,
+                    "date": datetime.strptime(correct_date, "%Y-%m-%d"),
                     "average_price": row.iloc[1],
                     "change": row.iloc[2],
                     "purchase_price": row.iloc[3],
@@ -163,8 +177,8 @@ def processing_reports(report):
             if not reports.find_one({"date": report, "symbol": exists['value']}):
                 reports.insert_one(record)
                 print("Record inserted.")
-            else:
-                print("Record already exists. Skipping insertion.")                
+            # else:
+            #     print("Record already exists. Skipping insertion.")                
             # print(f"POSTOI FIRMATA {row.iloc[0]}")
             # print(f"INFO: {exists['value']}")
         # else:
