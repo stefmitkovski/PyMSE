@@ -7,8 +7,11 @@ from bson.json_util import dumps
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from async_tasks import processing_reports_async, downloading_reports_async
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
+
 load_dotenv()
 
 # GLOBAL VARIBLES
@@ -36,7 +39,7 @@ def latest():
         exists = list(reports.find({'date': current_date_formated},{'_id':0}))
         
         if len(exists) > 0:
-            return jsonify(exists)
+            return jsonify(dumps(exists))
         current_date -= timedelta(days=1)
             
     return jsonify({"ok":True}),200
