@@ -26,6 +26,13 @@ NUM_THREADS = int(os.getenv("NUM_THREADS"))
 mongo_client = MongoClient(MONGODB_HOST, MONGODB_PORT)
 db = mongo_client[DB_NAME]
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST"
+    response.headers["Access-Control-Allow-Headers"] = "Origin, X-Requested-With, Content-Type, Accept"
+    return response
+
 # Zemanje na najnovi informacii na momentalno trguvani akcii
 @app.route('/api/reports/latest')
 def latest():
@@ -44,6 +51,50 @@ def latest():
             
     return jsonify({"ok":True}),200
 
+@app.route('/api/reports/week_report')
+def week_report():
+    reports = db['reports']
+    current_date = datetime.now()
+    last_date = datetime(STARTING_DATE, 1, 1)
+
+    combined_data = {}
+    days_collected = 0
+
+    while current_date >= last_date and days_collected < 7:
+        print(f"Start date: {current_date}, End date: {last_date}")
+        current_date_formated = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        daily_records = list(reports.find({'date': current_date_formated}, {'_id': 0}))
+        
+        if daily_records:
+            days_collected += 1
+            for record in daily_records:
+                symbol = record['symbol']
+                if symbol not in combined_data:
+                    combined_data[symbol] = record
+                    combined_data[symbol]['appeard'] = 1
+                else:
+                    new_average_price = record.get('average_price', 0)
+                    old_average_price = combined_data[symbol]['average_price']
+                    appeard = combined_data[symbol]['appeard']
+                    if new_average_price != 0:
+                        combined_data[symbol]['average_price'] = ((appeard *old_average_price)+new_average_price)/(appeard+1)
+                    combined_data[symbol]['change'] += record.get('change', 0.0)
+                    combined_data[symbol]['appeard'] = appeard +1
+
+                #     combined_data[symbol]['average_price'] += record.get('average_price', 0)
+                #     combined_data[symbol]['change'] += record.get('change', 0.0)
+                #     combined_data[symbol]['purchase_price'] += record.get('purchase_price', 0)
+                #     combined_data[symbol]['sale_price'] += record.get('sale_price', 0)
+                #     combined_data[symbol]['max'] += record.get('max', 0)
+                #     combined_data[symbol]['min'] += record.get('min', 0)
+                #     combined_data[symbol]['last_price'] = record.get('last_price', combined_data[symbol]['last_price'])
+                #     combined_data[symbol]['quantity'] += record.get('quantity', 0)
+                #     combined_data[symbol]['turnover_in_1000_den'] += record.get('turnover_in_1000_den', 0)
+        
+        current_date -= timedelta(days=1)
+
+    return jsonify(dumps(list(combined_data.values())))
 
 # API endpoint za vrakanje na informaciija za odredena firma
 @app.route('/api/reports/search', methods=['POST'])
@@ -57,27 +108,27 @@ def search_report():
     if 'from' in request.json:
         fromDate = request.json['from']
     else:
-        fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y-%m-%d')
+        fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y/%m/%d')
         
     if 'to' in request.json:
         toDate = request.json['to']
     else:
-        toDate = datetime.now().strftime("%Y-%m-%d")
+        toDate = datetime.now().strftime("%Y/%m/%d")
     
     reports = db['reports']
     if symbol == '':
         results = reports.find({
             "date": {
-                "$gte": datetime.strptime(fromDate, "%Y-%m-%d"),
-                "$lte": datetime.strptime(toDate, "%Y-%m-%d")
+                "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
+                "$lte": datetime.strptime(toDate, "%Y/%m/%d")
                 }
             })
     else:
         results = reports.find({
             "symbol": symbol,
             "date": {
-                "$gte": datetime.strptime(fromDate, "%Y-%m-%d"),
-                "$lte": datetime.strptime(toDate, "%Y-%m-%d")
+                "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
+                "$lte": datetime.strptime(toDate, "%Y/%m/%d")
                 }
             })
         
@@ -87,7 +138,7 @@ def search_report():
         del document["_id"]
         response_data.append(document)
 
-    return jsonify(response_data), 200
+    return jsonify(dumps(response_data)), 200
 
 # API za procesiranje na izestaite
 @app.route('/api/reports/process', methods=['POST'])
@@ -135,15 +186,25 @@ def list_reports(fromRequest = True):
             return jsonify({"reports":None}),200
         else:
             return None
-         
-    files = [
-                re.sub(r'\.[^.]+$', '', f)  # Trgni sve posle prvata potcka
-                for f in os.listdir(REPORTS_DIRECTORY)
-                if os.path.isfile(os.path.join(REPORTS_DIRECTORY, f)) 
-            ]
+    
     if fromRequest:
+        files = [
+        re.sub(
+            r'(\d{1,2})\.(\d{1,2})\.(\d{4})\.xls$',
+            lambda m: f"{m.group(3)}/{m.group(2).zfill(2)}/{m.group(1).zfill(2)}",
+            f
+        )
+        for f in os.listdir(REPORTS_DIRECTORY)
+        if os.path.isfile(os.path.join(REPORTS_DIRECTORY, f))
+        ]
+
         return jsonify({"reports":files}),200
     else:
+        files = [
+                    re.sub(r'\.[^.]+$', '', f)  # Trgni sve posle prvata potcka
+                    for f in os.listdir(REPORTS_DIRECTORY)
+                    if os.path.isfile(os.path.join(REPORTS_DIRECTORY, f)) 
+                ]
         return files
 
 # Vrati lita na firmi koi se pojavuvaat vo izvestaite
@@ -210,3 +271,4 @@ if __name__ == '__main__':
         sys.exit(1)
         
     app.run(host='0.0.0.0',port=5000,debug=True)
+    
