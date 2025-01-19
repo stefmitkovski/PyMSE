@@ -69,6 +69,7 @@ def processing_reports_async(report):
         if exists and not priority_shares:
             record = {
                     "symbol": exists['value'],
+                    "name": exists['key'],
                     "date": datetime.strptime(correct_date, "%Y-%m-%d"),
                     "average_price": row.iloc[1],
                     "change": row.iloc[2],
@@ -116,7 +117,7 @@ def downloading_reports_async(date,current_reports):
                     with download_lock:
                         if report['text'] in current_reports:
                             print(f"Nitka {thread_name} go preskoknuva izvestajot {report['text']}, bidejki vejke postoi.")
-                            return                    
+                            continue
                         
                     get_report = requests.get(WEBSITE_URL + report['href'])
                     if get_report.status_code == 200:

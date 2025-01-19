@@ -236,28 +236,35 @@ def list_reports(fromRequest = True):
                 
 #     return jsonify(list_companies), 200
     
+# @app.route('/api/list_reports')
+# def func_list_reports():
+#     companies = db['companies']
+#     all_companies = companies.find_one({'value':'KMB'})['key']
+#     print(all_companies)
+#     return 'ok'
+#     # return jsonify(list(all_companies)),200
+
 if __name__ == '__main__':
     
     # Kreiranje na key-value databaza vo mongodb
     try:
         df = pd.read_csv("companies.csv")
-        key_value_data = [
-            {"key": row[1].strip().lower(),
-             "value": row[0]} for row in df.values
+
+        seen_values = set()
+        list_companies = [
+            item for item in (
+                {"key": row[1].strip().lower(), "value": row[0]} for row in df.values
+            )
+            if not (item["value"] in seen_values or seen_values.add(item["value"]))
         ]
 
-        collection = db['companies']
+        companies = db['companies']
 
-        inserted_count = 0
-        for record in key_value_data:
-            # Proveri dali postoi veke takov kluc
-            existing_doc = collection.find_one({"key": record["key"]})
-            # Ako ne postoi ne go vnesuvaj vo baza
+        for record in list_companies:
+            existing_doc = companies.find_one({"key": record["key"]})
             if not existing_doc:
-                collection.insert_one(record)
-                inserted_count += 1
-        if inserted_count > 0:
-            print("Inserted {inserted_count} new companies")
+                companies.insert_one(record)
+
     except FileNotFoundError:
         print("Error: 'companies.csv' file not found.")
         sys.exit(1)
@@ -268,7 +275,7 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        sys.exit(1)
-        
+        sys.exit(1)        
+    
     app.run(host='0.0.0.0',port=5000,debug=True)
     
