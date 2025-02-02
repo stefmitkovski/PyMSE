@@ -26,13 +26,14 @@ db = mongo_client[DB_NAME]
 def processing_reports_async(report):
     file_path = 'reports/'
     companies = db['companies']
+    all_companies = db['all_companies']
     reports = db['reports']
     priority_shares = False
     thread_name = threading.current_thread().name
     
     # Ako ne e vo opseg ripnigo
     if int(report.split('.')[2]) < STARTING_DATE:
-        print(f"Nitkata {thread_name} go ripa izvestajot {report}, bidejki e nadvor od obseg")
+        # print(f"Nitkata {thread_name} go ripa izvestajot {report}, bidejki e nadvor od obseg")
         return
     
     # Proveri dali veke e vnesen toj zapis
@@ -46,10 +47,9 @@ def processing_reports_async(report):
     try:
         report_content = pd.read_excel(temp_path)
     except:
-            # print(temp_path)
         print(f"Nitkata {thread_name} nemoze da go otvori izvestajot {report} !")
         return
-        
+
     for _, row in report_content.iterrows():
                     
         if re.search("приоритетни акции",str(row.iloc[0]).strip()) or re.search("prioritetni akcii",str(row.iloc[0]).strip()):
@@ -60,16 +60,19 @@ def processing_reports_async(report):
                 
         if pd.isna(row.iloc[1]):
             continue
-            
-        key = row.iloc[0].strip().lower() 
-        exists = companies.find_one({"key": key})
+        
+        key = row.iloc[0].strip().lower()
+        exists = all_companies.find_one({"key": key})
 
+        if exists is not None:
+           share = companies.find_one({'value': exists['value']})
+        
         correct_date = f"{split_date[2]}-{split_date[1]}-{split_date[0]}"
         # print(f"Pravilen datum {correct_date}")
         if exists and not priority_shares:
             record = {
-                    "symbol": exists['value'],
-                    "name": exists['key'],
+                    "symbol": share['value'],
+                    "name": share['key'],
                     "date": datetime.strptime(correct_date, "%Y-%m-%d"),
                     "average_price": row.iloc[1],
                     "change": row.iloc[2],
@@ -87,13 +90,11 @@ def processing_reports_async(report):
                 print(f"Nitkata {thread_name} kreira nov zapis vo baza od datum: {correct_date}")
             else:
                 print(f"Nitkata {thread_name} go preskoknuva izvestajot za datumot: {correct_date}")                
-            print(f"POSTOI FIRMATA {row.iloc[0]}")
-            print(f"INFO: {exists['value']}")
-        else:
-            if priority_shares:
-                print(f"PIORITETNA FIRMATA {row.iloc[0]}")    
-            else:
-                print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
+        # else:
+        #     if priority_shares:
+        #         print(f"PIORITETNA FIRMATA {row.iloc[0]}")    
+        #     else:
+        #         print(f"NEPOSTOI FIRMATA {row.iloc[0]}")
 
 
 def downloading_reports_async(date,current_reports):

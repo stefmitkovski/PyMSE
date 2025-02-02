@@ -99,46 +99,45 @@ def week_report():
 # API endpoint za vrakanje na informaciija za odredena firma
 @app.route('/api/reports/search', methods=['POST'])
 def search_report():
-    fromDate = ''
-    toDate = ''
-    symbol = ''
-    if 'symbol' in request.json:
-        symbol = request.json['symbol']
-
-    if 'from' in request.json:
-        fromDate = request.json['from']
+    fromDate = request.json.get("from", datetime(STARTING_DATE, 1, 1).strftime("%Y/%m/%d"))
+    toDate = request.json.get("to", datetime.now().strftime("%Y/%m/%d"))
+    symbols = request.json.get("symbol", [])
+    reports = db["reports"]
+    results = []
+    if symbols:
+        for symbol in symbols:
+            cursor = reports.find(
+                {
+                    "symbol": symbol,
+                    "date": {
+                        "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
+                        "$lte": datetime.strptime(toDate, "%Y/%m/%d")
+                    }
+                },
+                {"_id": 0}
+            )
+            results.extend(list(cursor))
     else:
-        fromDate = datetime(STARTING_DATE, 1, 1).strftime('%Y/%m/%d')
-        
-    if 'to' in request.json:
-        toDate = request.json['to']
-    else:
-        toDate = datetime.now().strftime("%Y/%m/%d")
-    
-    reports = db['reports']
-    if symbol == '':
-        results = reports.find({
-            "date": {
-                "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
-                "$lte": datetime.strptime(toDate, "%Y/%m/%d")
-                }
-            })
-    else:
-        results = reports.find({
-            "symbol": symbol,
-            "date": {
-                "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
-                "$lte": datetime.strptime(toDate, "%Y/%m/%d")
-                }
-            })
-        
-    response_data = []
+        if fromDate == toDate:
+            cursor = reports.find(
+                {
+                    "date": datetime.strptime(fromDate, "%Y/%m/%d")
+                },
+                {"_id": 0}
+            )
+        else:
+            cursor = reports.find(
+                {
+                    "date": {
+                        "$gte": datetime.strptime(fromDate, "%Y/%m/%d"),
+                        "$lte": datetime.strptime(toDate, "%Y/%m/%d")
+                    }
+                },
+                {"_id": 0}
+            )
+        results = list(cursor)
 
-    for document in results:
-        del document["_id"]
-        response_data.append(document)
-
-    return jsonify(dumps(response_data)), 200
+    return jsonify(dumps(results)), 200
 
 # API za procesiranje na izestaite
 @app.route('/api/reports/process', methods=['POST'])
@@ -198,7 +197,7 @@ def list_reports(fromRequest = True):
         if os.path.isfile(os.path.join(REPORTS_DIRECTORY, f))
         ]
 
-        return jsonify({"reports":files}),200
+        return jsonify({"reports":dumps(files)}),200
     else:
         files = [
                     re.sub(r'\.[^.]+$', '', f)  # Trgni sve posle prvata potcka
@@ -236,13 +235,26 @@ def list_reports(fromRequest = True):
                 
 #     return jsonify(list_companies), 200
     
-# @app.route('/api/list_reports')
-# def func_list_reports():
-#     companies = db['companies']
-#     all_companies = companies.find_one({'value':'KMB'})['key']
-#     print(all_companies)
-#     return 'ok'
-#     # return jsonify(list(all_companies)),200
+@app.route('/api/list_companies')
+def list_companies():
+    try:
+        companies = db['companies']
+        all_companies = companies.find({})
+        company_list = []
+        for document in all_companies:
+            company_list.append(
+                {
+                    'label': document['key'].upper()+f"({document['value']})",
+                    'value': document['value']
+                }
+            )
+
+        return jsonify(dumps(company_list)), 200
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({"error": "An error occurred while fetching reports."}), 500
+
 
 if __name__ == '__main__':
     
@@ -251,19 +263,31 @@ if __name__ == '__main__':
         df = pd.read_csv("companies.csv")
 
         seen_values = set()
-        list_companies = [
+        list_short_name_companies = [
             item for item in (
                 {"key": row[1].strip().lower(), "value": row[0]} for row in df.values
             )
             if not (item["value"] in seen_values or seen_values.add(item["value"]))
         ]
 
+        list_all_companies = [
+            item for item in (
+                {"key": row[1].strip().lower(), "value": row[0]} for row in df.values
+            )
+        ]
         companies = db['companies']
-
-        for record in list_companies:
+        
+        for record in list_short_name_companies:
             existing_doc = companies.find_one({"key": record["key"]})
             if not existing_doc:
                 companies.insert_one(record)
+
+        all_companies = db['all_companies']
+        for record in list_all_companies:
+            existing_doc = all_companies.find_one({"key": record["key"]})
+            if not existing_doc:
+                all_companies.insert_one(record)
+        
 
     except FileNotFoundError:
         print("Error: 'companies.csv' file not found.")
