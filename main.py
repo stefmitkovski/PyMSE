@@ -15,8 +15,10 @@ CORS(app)
 load_dotenv()
 
 # GLOBAL VARIBLES
-MONGODB_HOST = os.getenv("HOST")
-MONGODB_PORT = int(os.getenv("PORT"))
+MONGODB_HOST = os.getenv("MONGODB_HOST")
+MONGODB_PORT = int(os.getenv("MONGODB_PORT"))
+HOST = os.getenv("HOST")
+PORT = int(os.getenv("PORT"))
 DB_NAME = os.getenv("DB")
 REPORTS_DIRECTORY = os.getenv("REPORTS_DIRECTORY")
 STARTING_DATE = int(os.getenv("STARTING_DATE"))
@@ -236,7 +238,7 @@ def list_reports(fromRequest = True):
 #     return jsonify(list_companies), 200
     
 @app.route('/api/list_companies')
-def list_companies():
+def list_companies(fromRequest = True):
     try:
         companies = db['companies']
         all_companies = companies.find({})
@@ -249,15 +251,18 @@ def list_companies():
                 }
             )
 
-        return jsonify(dumps(company_list)), 200
+        if(fromRequest):
+            return jsonify(dumps(company_list)), 200
+        else:
+            return [company['label'] for company in company_list]
 
     except Exception as e:
         print(f"An error occurred: {e}")
-        return jsonify({"error": "An error occurred while fetching reports."}), 500
-
-
-if __name__ == '__main__':
-    
+        if(fromRequest):
+            return jsonify({"error": "An error occurred while fetching reports."}), 500
+        else:
+            return 'Грешка при влечењето на комапниите од датабазата'
+def mongodb_initial():
     # Kreiranje na key-value databaza vo mongodb
     try:
         df = pd.read_csv("companies.csv")
@@ -290,16 +295,24 @@ if __name__ == '__main__':
         
 
     except FileNotFoundError:
-        print("Error: 'companies.csv' file not found.")
-        sys.exit(1)
+        print("Грешка: Датотеката „companies.csv“ не е пронајдена.")
+        return False
 
     except errors.ServerSelectionTimeoutError:
-        print("Error: Unable to connect to MongoDB. Please check if the server is running.")
-        sys.exit(1)
+        print("Грешка: Не може да се поврзе со MongoDB. Ве молиме проверете дали серверот работи.")
+        return False
 
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        sys.exit(1)        
+        print(f"Настана неочекувана грешка: {e}")
+        return False
+
+    return True
+
+def start():
+    if not mongodb_initial():
+        sys.exit(1)
     
-    app.run(host='0.0.0.0',port=5000,debug=True)
-    
+    app.run(host=HOST, port=PORT, debug=True, use_reloader=False)
+
+if __name__ == '__main__':
+    start()

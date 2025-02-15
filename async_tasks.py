@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # GLOBAL VARIBLES
-MONGODB_HOST = os.getenv("HOST")
-MONGODB_PORT = int(os.getenv("PORT"))
+MONGODB_HOST = os.getenv("MONGODB_HOST")
+MONGODB_PORT = int(os.getenv("MONGODB_PORT"))
 DB_NAME = os.getenv("DB")
 REPORTS_URL = os.getenv("REPORTS_URL")
 WEBSITE_URL = os.getenv("WEBSITE_URL")
