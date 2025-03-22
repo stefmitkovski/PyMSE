@@ -6,8 +6,12 @@ import  sys, os, re
 from bson.json_util import dumps
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from async_tasks import processing_reports_async, downloading_reports_async
+from async_tasks import processing_reports_async, downloading_reports_async, latest_async
 from flask_cors import CORS
+from threading import Thread
+import redis
+import time
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -24,6 +28,14 @@ REPORTS_DIRECTORY = os.getenv("REPORTS_DIRECTORY")
 STARTING_DATE = int(os.getenv("STARTING_DATE"))
 NUM_THREADS = int(os.getenv("NUM_THREADS"))
 
+CACHING = int(os.getenv("CACHING"))
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT"))
+REDIS_DB = int(os.getenv("REDIS_DB"))
+
+if CACHING == 1:
+    rs = redis.Redis(host=REDIS_HOST,port=REDIS_PORT,db=REDIS_DB)
+
 # INITIALIZATION
 mongo_client = MongoClient(MONGODB_HOST, MONGODB_PORT)
 db = mongo_client[DB_NAME]
@@ -35,9 +47,31 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Headers"] = "Origin, X-Requested-With, Content-Type, Accept"
     return response
 
-# Zemanje na najnovi informacii na momentalno trguvani akcii
+# Zemanje na momentalno najtrguvani akcii
 @app.route('/api/reports/latest')
-def latest():
+def latest(fromCaching=False):
+    if fromCaching == False and CACHING == 1:
+        cached_data = json.loads(rs.get("latest"))
+        if cached_data:
+            return jsonify(cached_data)
+    
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(latest_async)
+        result = future.result()
+    
+    if CACHING == 1 and fromCaching == True:
+        rs.set("latest",json.dumps(result))
+    else:
+        return jsonify(result)
+
+# Zemanje na najnovi informacii od najnoviot izvestaj
+@app.route('/api/reports/current')
+def current(fromCaching=False):
+    if fromCaching == False and CACHING == 1:
+        cached_data = json.loads(rs.get("current"))
+        if cached_data:
+            return jsonify(cached_data)
+
     reports = db['reports']
     current_date = datetime.now()
     last_date = datetime(STARTING_DATE, 1, 1)
@@ -48,13 +82,22 @@ def latest():
         exists = list(reports.find({'date': current_date_formated},{'_id':0}))
         
         if len(exists) > 0:
+            if CACHING == 1 and fromCaching == True:
+                rs.set("current",json.dumps(dumps(exists)))
+                return
+            
             return jsonify(dumps(exists))
         current_date -= timedelta(days=1)
             
     return jsonify({"ok":True}),200
 
 @app.route('/api/reports/week_report')
-def week_report():
+def week_report(fromCaching=False):
+    if fromCaching == False and CACHING == 1:
+        cached_data = json.loads(rs.get("week_report"))
+        if cached_data:
+            return jsonify(cached_data)
+    
     reports = db['reports']
     current_date = datetime.now()
     last_date = datetime(STARTING_DATE, 1, 1)
@@ -96,7 +139,10 @@ def week_report():
         
         current_date -= timedelta(days=1)
 
-    return jsonify(dumps(list(combined_data.values())))
+    if CACHING == 1 and fromCaching == True:
+        rs.set("week_report", json.dumps(dumps(list(combined_data.values()))))    
+    else:
+        return jsonify(dumps(list(combined_data.values())))
 
 # API endpoint za vrakanje na informaciija za odredena firma
 @app.route('/api/reports/search', methods=['POST'])
@@ -262,6 +308,7 @@ def list_companies(fromRequest = True):
             return jsonify({"error": "An error occurred while fetching reports."}), 500
         else:
             return 'Грешка при влечењето на комапниите од датабазата'
+        
 def mongodb_initial():
     # Kreiranje na key-value databaza vo mongodb
     try:
@@ -308,10 +355,30 @@ def mongodb_initial():
 
     return True
 
+def caching():
+    while True:
+        print("PRAVAM KERIRANJE ...")
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # executor.submit(latest(fromCaching=True))
+            executor.submit(current(fromCaching=True))
+            executor.submit(week_report(fromCaching=True))
+        print("ZAVRSIV SO KESIRANJETO, ODMORAM ...")
+        time.sleep(10)
+
 def start():
     if not mongodb_initial():
         sys.exit(1)
-    
+
+    if CACHING == 1:
+        try:
+            rs.ping()
+            caching_thread = Thread(target=caching, daemon=True)
+            caching_thread.start()
+        except Exception as e:
+            print("NEMATE INSTALIRANO ILI NE E STARTUVAN REDIS\n")
+            print(e)
+            sys.exit(1)
+
     app.run(host=HOST, port=PORT, debug=True, use_reloader=False)
 
 if __name__ == '__main__':

@@ -139,3 +139,22 @@ def downloading_reports_async(date,current_reports):
         print(f"Nitkata {thread_name} ima problem so konekcijata: {e}")
         print(f"Nitkata {thread_name} probuva pak da se konekcira...")
         time.sleep(3)
+
+def latest_async():
+    result = requests.get(WEBSITE_URL)
+    page = BeautifulSoup(result.text, "html.parser")
+    sidebar = page.find("ul", {"class": "newsticker"})
+    index = page.find("div", {"class": "index-title"})
+    items = index.find_all("span")[3:]
+
+    result = []
+    items = sidebar.find_all("li")
+    for item in items[3:]:
+        arr = str(item.text).split()
+        result.append({
+            "name": arr[0],
+            "value": arr[1],
+            "precent": arr[2]
+        })
+
+    return result
