@@ -358,12 +358,12 @@ def mongodb_initial():
 def caching():
     while True:
         print("PRAVAM KERIRANJE ...")
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             # executor.submit(latest(fromCaching=True))
             executor.submit(current(fromCaching=True))
             executor.submit(week_report(fromCaching=True))
         print("ZAVRSIV SO KESIRANJETO, ODMORAM ...")
-        time.sleep(10)
+        time.sleep(60)
 
 def start():
     if not mongodb_initial():

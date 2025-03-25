@@ -149,12 +149,12 @@ def latest_async():
 
     result = []
     items = sidebar.find_all("li")
-    for item in items[3:]:
+    for item in items[0:]:
         arr = str(item.text).split()
         result.append({
-            "name": arr[0],
-            "value": arr[1],
-            "precent": arr[2]
+            "symbol": arr[0],
+            "last_price": arr[1],
+            "change": arr[2]
         })
 
     return result
