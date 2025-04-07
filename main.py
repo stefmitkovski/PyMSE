@@ -146,7 +146,7 @@ def week_report(fromCaching=False):
 
 # API endpoint za vrakanje na informaciija za odredena firma
 @app.route('/api/reports/search', methods=['POST'])
-def search_report():
+def search():
     fromDate = request.json.get("from", datetime(STARTING_DATE, 1, 1).strftime("%Y/%m/%d"))
     toDate = request.json.get("to", datetime.now().strftime("%Y/%m/%d"))
     symbols = request.json.get("symbol", [])
@@ -357,12 +357,12 @@ def mongodb_initial():
 
 def caching():
     while True:
-        print("PRAVAM KERIRANJE ...")
+        # print("PRAVAM KERIRANJE ...")
         with ThreadPoolExecutor(max_workers=1) as executor:
-            # executor.submit(latest(fromCaching=True))
+            executor.submit(latest(fromCaching=True))
             executor.submit(current(fromCaching=True))
             executor.submit(week_report(fromCaching=True))
-        print("ZAVRSIV SO KESIRANJETO, ODMORAM ...")
+        # print("ZAVRSIV SO KESIRANJETO, ODMORAM ...")
         time.sleep(60)
 
 def start():
